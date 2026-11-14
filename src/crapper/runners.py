@@ -330,12 +330,15 @@ def python_roots(root: Path, files: list[Path]) -> list[Path]:
     return sorted(found)
 
 
+_SYSTEM_PYTHON = "python3"
+
+
 def _python_executable(package: Path) -> str:
     for relative in (".venv/bin/python", "venv/bin/python"):
         candidate = package / relative
         if candidate.is_file():
             return str(candidate)
-    return "python3"
+    return _SYSTEM_PYTHON
 
 
 def uses_pytest(package: Path) -> bool:
@@ -388,8 +391,21 @@ def python_coverage_commands(
 
 
 def _ensure_python_module(py: str, package: Path, module: str) -> bool:
+    """Import `module`, installing it only into a project virtual environment.
+
+    The `python3` fallback is the user's own interpreter, so a missing module
+    is reported there and never installed.
+    """
+
     if run_shell([py, "-c", f"import {module}"], package) == 0:
         return True
+    if py == _SYSTEM_PYTHON:
+        _warn(
+            f"{module} is not installed in {py}, and crapper does not install packages "
+            f"outside a project virtual environment. Run `{py} -m pip install {module}`, "
+            f"or create a .venv in {package}."
+        )
+        return False
     _warn(
         f"Installing {module} for Python coverage. "
         "The project requirements are left unchanged."
