@@ -58,6 +58,10 @@ Options:
   --use-existing-coverage       Read coverage already on disk. Do not rerun tests.
   --coverage-command <cmd>      Run this command instead of the per-language
                                 coverage tools, then read the reports it wrote.
+  --python-test-dir <path>      Python tests live here, relative to the project
+                                root. Run them once from the project root
+                                instead of from each source tree's nearest
+                                pyproject.toml. Not with --coverage-command.
   --threshold <number>          Exit 2 when the worst CRAP score is above this.
 
 Arguments:
@@ -98,6 +102,7 @@ class Options:
     no_coverage: bool = False
     use_existing_coverage: bool = False
     coverage_command: str | None = None
+    python_test_dir: str | None = None
     threshold: float | None = None
     changed: bool = False
 
@@ -127,6 +132,10 @@ def parse_args(argv: list[str] | None = None) -> Options:
                 continue
             if arg == "--coverage-command":
                 options.coverage_command = _take(args, index, arg)
+                index += 2
+                continue
+            if arg == "--python-test-dir":
+                options.python_test_dir = _take(args, index, arg)
                 index += 2
                 continue
             if arg == "--threshold":
@@ -159,6 +168,12 @@ def parse_args(argv: list[str] | None = None) -> Options:
         return Options(
             action="help",
             message=f"--no-coverage cannot be combined with --coverage-command\n\n{HELP}",
+            exit_code=1,
+        )
+    if options.python_test_dir and options.coverage_command:
+        return Options(
+            action="help",
+            message=f"--python-test-dir cannot be combined with --coverage-command\n\n{HELP}",
             exit_code=1,
         )
     return options
@@ -285,7 +300,7 @@ def _coverage_bundle(options: Options, root: Path, files: list[Path]):
         return None
     if options.use_existing_coverage:
         return load_bundle(root)
-    status = run_coverage(root, files, options.coverage_command)
+    status = run_coverage(root, files, options.coverage_command, options.python_test_dir)
     if options.coverage_command and status not in (0, None):
         return CoverageBundle()
     return load_bundle(root)
