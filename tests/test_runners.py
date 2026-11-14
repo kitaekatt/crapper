@@ -386,17 +386,18 @@ def test_python_sources_ignore_a_file_outside_the_package(tmp_path):
     assert python_sources(tmp_path, [inside, Path("/tmp/crapper-outside.py")]) == "src"
 
 
-def test_missing_python_module_is_installed(tmp_path, monkeypatch):
+def test_missing_python_module_is_installed_into_a_project_venv(tmp_path, monkeypatch):
     commands = []
+    venv_python = str(tmp_path / ".venv" / "bin" / "python")
 
     def shell(command, _cwd):
         commands.append(command)
-        if _as_text(command).startswith("python3 -c"):
+        if _as_text(command).startswith(f"{venv_python} -c"):
             return 1
         return 0
 
     monkeypatch.setattr("crapper.runners.run_shell", shell)
-    assert _ensure_python_module("python3", tmp_path, "coverage") is True
+    assert _ensure_python_module(venv_python, tmp_path, "coverage") is True
     assert any("pip install" in _as_text(command) for command in commands)
     commands.clear()
 
@@ -405,7 +406,7 @@ def test_missing_python_module_is_installed(tmp_path, monkeypatch):
         return 0
 
     monkeypatch.setattr("crapper.runners.run_shell", already)
-    assert _ensure_python_module("python3", tmp_path, "coverage") is True
+    assert _ensure_python_module(venv_python, tmp_path, "coverage") is True
     assert commands == ["probe"]
 
 
@@ -547,3 +548,44 @@ def test_vitest_install_restores_manifests_when_install_changes_them(tmp_path, m
 def test_python_sources_name_a_top_level_module_without_its_suffix(tmp_path):
     module = tmp_path / "carddav.py"
     assert python_sources(tmp_path, [module, tmp_path / "test_carddav.py"]) == "carddav"
+
+
+def test_a_missing_module_is_not_installed_outside_a_project_venv(tmp_path, monkeypatch, capsys):
+    commands = []
+
+    def shell(command, _cwd):
+        commands.append(_as_text(command))
+        return 1 if "-c import" in _as_text(command) else 0
+
+    monkeypatch.setattr("crapper.runners.run_shell", shell)
+    assert _ensure_python_module("python3", tmp_path, "coverage") is False
+    assert commands == ["python3 -c import coverage"]
+    err = capsys.readouterr().err
+    assert "coverage is not installed in python3" in err
+    assert "python3 -m pip install coverage" in err
+    assert str(tmp_path) in err
+
+
+def test_a_present_module_is_used_outside_a_project_venv(tmp_path, monkeypatch):
+    commands = []
+    monkeypatch.setattr(
+        "crapper.runners.run_shell", lambda command, _cwd: commands.append(_as_text(command)) or 0
+    )
+    assert _ensure_python_module("python3", tmp_path, "coverage") is True
+    assert commands == ["python3 -c import coverage"]
+
+
+def test_a_run_without_a_project_venv_never_runs_pip(tmp_path, monkeypatch, capsys):
+    commands = []
+
+    def shell(command, _cwd):
+        commands.append(_as_text(command))
+        return 1 if "-c import" in _as_text(command) else 0
+
+    monkeypatch.setattr("crapper.runners.run_shell", shell)
+    _write(tmp_path, "pyproject.toml", "[tool.pytest.ini_options]\n")
+    source = _write(tmp_path, "src/app.py", "def run():\n    return 1\n")
+    run_coverage(tmp_path, [source], None)
+    assert not any("pip" in command for command in commands)
+    assert not any("coverage run" in command for command in commands)
+    assert "Python coverage will score 0%" in capsys.readouterr().err
