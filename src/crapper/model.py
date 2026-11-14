@@ -30,3 +30,5 @@ class Entry:
     crap: float | None
     path: str
     language: str
+    # 1-based line where the function starts; `path` is relative to the scanned root.
+    start_line: int

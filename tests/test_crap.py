@@ -12,6 +12,7 @@ def entry(**kwargs):
         coverage=100.0,
         crap=1.0,
         path="src/demo/core.clj",
+        start_line=7,
         language="clojure",
     )
     defaults.update(kwargs)
@@ -95,3 +96,9 @@ def test_edn_writes_nil_for_missing_coverage():
     text = render_edn([entry(coverage=None, crap=None)])
     assert ":coverage nil" in text
     assert ":crap nil" in text
+
+
+def test_edn_carries_path_and_start_line():
+    text = render_edn([entry(path="src/demo/core.clj", start_line=7)])
+    assert ':path "src/demo/core.clj"' in text
+    assert ":line 7" in text
