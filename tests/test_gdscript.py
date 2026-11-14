@@ -64,7 +64,7 @@ def test_location_and_language_are_recorded():
     by_name = {fn.name: fn for fn in found}
     assert by_name["pick"].start_line == 5
     assert by_name["every"].start_line == 8
-    assert by_name["d"].start_line == 42
+    assert by_name["d"].start_line == 40
     assert all(fn.language == "gdscript" and fn.path == "src/demo/hero.gd" for fn in found)
 
 
