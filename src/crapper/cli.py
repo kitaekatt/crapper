@@ -21,7 +21,7 @@ from crapper.discover import (
 )
 from crapper.metrics import write_metrics
 from crapper.report import format_report
-from crapper.runners import run_coverage
+from crapper.runners import PYTHON_INSTALLERS, run_coverage
 
 _SKIPPED_DIRS = ", ".join(sorted(SKIP_DIRS | TEST_DIRS))
 _TEST_PATTERNS = ", ".join(
@@ -58,6 +58,9 @@ Options:
   --use-existing-coverage       Read coverage already on disk. Do not rerun tests.
   --coverage-command <cmd>      Run this command instead of the per-language
                                 coverage tools, then read the reports it wrote.
+  --python-installer <pip|uv>   Install a missing coverage or pytest into the
+                                project's Python with pip or with
+                                `uv pip install --python`. Default: pip.
   --threshold <number>          Exit 2 when the worst CRAP score is above this.
 
 Arguments:
@@ -98,6 +101,7 @@ class Options:
     no_coverage: bool = False
     use_existing_coverage: bool = False
     coverage_command: str | None = None
+    python_installer: str = "pip"
     threshold: float | None = None
     changed: bool = False
 
@@ -127,6 +131,13 @@ def parse_args(argv: list[str] | None = None) -> Options:
                 continue
             if arg == "--coverage-command":
                 options.coverage_command = _take(args, index, arg)
+                index += 2
+                continue
+            if arg == "--python-installer":
+                raw = _take(args, index, arg)
+                if raw not in PYTHON_INSTALLERS:
+                    raise ValueError(f"--python-installer must be pip or uv, not {raw}")
+                options.python_installer = raw
                 index += 2
                 continue
             if arg == "--threshold":
@@ -285,7 +296,7 @@ def _coverage_bundle(options: Options, root: Path, files: list[Path]):
         return None
     if options.use_existing_coverage:
         return load_bundle(root)
-    status = run_coverage(root, files, options.coverage_command)
+    status = run_coverage(root, files, options.coverage_command, options.python_installer)
     if options.coverage_command and status not in (0, None):
         return CoverageBundle()
     return load_bundle(root)

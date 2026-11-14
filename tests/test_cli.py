@@ -399,3 +399,35 @@ def test_main_exits_with_the_status(monkeypatch):
         assert exc.code == 4
     else:
         raise AssertionError("main did not exit")
+
+
+def test_python_installer_option_defaults_to_pip_and_accepts_pip_or_uv():
+    assert parse_args([]).python_installer == "pip"
+    assert parse_args(["--python-installer", "uv"]).python_installer == "uv"
+    assert parse_args(["--python-installer", "pip"]).python_installer == "pip"
+
+
+def test_python_installer_option_rejects_an_unknown_value_and_a_missing_value():
+    unknown = parse_args(["--python-installer", "conda"])
+    assert unknown.exit_code == 1
+    assert "--python-installer must be pip or uv" in unknown.message
+    missing = parse_args(["--python-installer"])
+    assert missing.exit_code == 1
+    assert "--python-installer requires a value" in missing.message
+
+
+def test_python_installer_reaches_the_coverage_run(tmp_path, monkeypatch):
+    _write(tmp_path, "src/app.py", "def run():\n    return 1\n")
+    called = []
+    monkeypatch.setattr("crapper.cli.run_coverage", lambda *args: called.append(args))
+    assert run(["--root", str(tmp_path), "--python-installer", "uv"]) == 0
+    assert called[0][3] == "uv"
+    called.clear()
+    assert run(["--root", str(tmp_path)]) == 0
+    assert called[0][3] == "pip"
+
+
+def test_help_documents_the_python_installer():
+    help_text = parse_args(["--help"]).message
+    assert "--python-installer <pip|uv>" in help_text
+    assert "Default: pip." in help_text
