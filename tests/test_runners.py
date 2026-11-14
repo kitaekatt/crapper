@@ -943,3 +943,51 @@ def test_the_refusal_outside_a_project_venv_names_the_chosen_installer(
     assert "-m pip" not in err
     assert _ensure_python_module("python3", tmp_path, "coverage", "pip") is False
     assert "python3 -m pip install coverage" in capsys.readouterr().err
+
+
+def test_test_dir_subprocess_coverage_and_uv_installer_work_together_in_one_run(
+    tmp_path, monkeypatch
+):
+    import shutil
+    import subprocess
+
+    from crapper import cli, runners
+
+    if shutil.which("uv") is None:
+        pytest.skip("needs uv on PATH")
+    # Sources in plugins/a (its own pyproject.toml), tests in the sibling tree
+    # tests/a, and the only caller of only_in_child is a child Python process.
+    _write(tmp_path, "plugins/a/pyproject.toml", "[project]\nname = 'a'\n")
+    _write(tmp_path, "plugins/a/a_pkg/__init__.py", "")
+    _write(tmp_path, "plugins/a/a_pkg/work.py", "def only_in_child():\n    return 41 + 1\n")
+    _write(
+        tmp_path,
+        "plugins/a/a_pkg/cli.py",
+        "from a_pkg.work import only_in_child\n\nif __name__ == '__main__':\n"
+        "    print(only_in_child())\n",
+    )
+    _write(tmp_path, "tests/a/conftest.py", "")
+    _write(
+        tmp_path,
+        "tests/a/test_cli.py",
+        "import subprocess, sys\nfrom pathlib import Path\n\n"
+        "plugin = Path(__file__).resolve().parents[2] / 'plugins' / 'a'\n"
+        "sys.path.insert(0, str(plugin))\n"
+        "import a_pkg.work  # measured in this process: only the def line runs\n\n"
+        "def test_child():\n"
+        "    out = subprocess.run([sys.executable, '-m', 'a_pkg.cli'], cwd=plugin,\n"
+        "                         capture_output=True, text=True, check=True)\n"
+        "    assert out.stdout.strip() == '42'\n",
+    )
+    # A uv-made venv has no pip, coverage or pytest: only the uv installer can fill it.
+    subprocess.run(
+        ["uv", "venv", "--quiet", "--python", sys.executable, str(tmp_path / ".venv")],
+        check=True,
+    )
+    monkeypatch.setattr("crapper.cli.run_coverage", runners.run_coverage)
+    lcov = tmp_path / "target/coverage/python/lcov.info"
+    base = ["--root", str(tmp_path), "--python-test-dir", "tests/a", "--python-installer", "uv"]
+    assert cli.run(base) == 0
+    assert _lcov_hits(lcov, "work.py") == {1: 1, 2: 0}
+    assert cli.run([*base, "--python-subprocess-coverage"]) == 0
+    assert _lcov_hits(lcov, "work.py") == {1: 1, 2: 1}
