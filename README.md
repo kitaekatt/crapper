@@ -28,6 +28,7 @@ The first run creates `.venv` and installs the tool. From a project root it walk
 ./crapper --changed                      # git additions and edits
 ./crapper combat                         # path fragment, same idea as crap4clj
 ./crapper --threshold 30                 # exit 2 when the worst score is higher
+./crapper --python-subprocess-coverage   # Python code that tests run in a child process counts as covered
 ```
 
 ## Snapshot
@@ -68,6 +69,8 @@ TypeScript, TSX, and JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`) use the same str
 Rust counts `if`, loops, each `match` arm, `?`, and `&&` / `||`. `mod tests` is skipped. Coverage is LCOV from `cargo llvm-cov` or `cargo tarpaulin`, run in the nearest directory that contains `Cargo.toml`. When neither tool is installed, the run installs `cargo-llvm-cov`.
 
 Python counts `if`, `elif`, `for`, `while`, `except`, each `match` case, a comprehension filter, a conditional expression, and each `and` / `or`. Nested functions stay inside the enclosing function. Coverage is LCOV from `coverage.py`, running pytest when the project uses it and `unittest` otherwise. `coverage` and `pytest` are installed into the project's interpreter when they are missing.
+
+Code that the tests run only in a child Python process, such as a command-line tool under test launched with `subprocess`, is reported at 0% by default, because `coverage run` measures only its own process. `--python-subprocess-coverage` turns on coverage.py's `patch = subprocess` setting, which measures the children into per-process data files, then runs `coverage combine` before writing the same LCOV report. It needs coverage.py 7.10.6 or newer in the project's interpreter, and fails with a message that says so when it is older. A project that has no coverage.py configuration of its own gets one generated at `target/coverage/python/.coveragerc` (`parallel = True`, `patch = subprocess`). crapper never edits or replaces a project's own configuration (`.coveragerc`, `setup.cfg` or `tox.ini` with a `[coverage:` section, `[tool.coverage` in `pyproject.toml`, or `COVERAGE_RCFILE`), so such a project must set `patch = subprocess` in its `[run]` section itself; without it, crapper says so and scores Python at 0%. It cannot be combined with `--coverage-command`.
 
 ## Coverage commands
 

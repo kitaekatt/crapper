@@ -7,6 +7,7 @@ tool, or a failed run, scores its functions at 0%.
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import shutil
 import subprocess
@@ -374,9 +375,17 @@ def _source_name(relative: Path) -> str:
 
 
 def python_coverage_commands(
-    py: str, kind: str, data_file: Path, report: Path, source: str
+    py: str,
+    kind: str,
+    data_file: Path,
+    report: Path,
+    source: str,
+    rcfile: Path | None = None,
 ) -> tuple[list[str], list[str]]:
-    run = [py, "-m", "coverage", "run", f"--data-file={data_file}"]
+    run = [py, "-m", "coverage", "run"]
+    if rcfile is not None:
+        run.append(f"--rcfile={rcfile}")
+    run.append(f"--data-file={data_file}")
     if source:
         run.append(f"--source={source}")
     if kind == "pytest":
@@ -385,6 +394,80 @@ def python_coverage_commands(
         run.extend(["-m", "unittest", "discover", "-s", "."])
     lcov = [py, "-m", "coverage", "lcov", f"--data-file={data_file}", "-o", str(report)]
     return run, lcov
+
+
+def python_combine_command(py: str, data_file: Path) -> list[str]:
+    return [py, "-m", "coverage", "combine", f"--data-file={data_file}"]
+
+
+# coverage.py measures child processes with `[run] patch = subprocess`.
+# 7.10.0 added it; 7.10.3 passes options given on the command line (--data-file,
+# --source) to the children; 7.10.6 passes source directories to children that
+# run in another directory.
+_SUBPROCESS_MIN_VERSION = (7, 10, 6)
+_PROBE_TOO_OLD = 3
+_PROBE_NO_PATCH = 4
+_VERSION_PROBE = (
+    f"import sys, coverage; sys.exit({_PROBE_TOO_OLD} "
+    f"if coverage.version_info < {_SUBPROCESS_MIN_VERSION} else 0)"
+)
+_PATCH_PROBE = (
+    "import sys, coverage; sys.exit(0 if 'subprocess' in "
+    f"coverage.Coverage().get_option('run:patch') else {_PROBE_NO_PATCH})"
+)
+_SUBPROCESS_RCFILE = "[run]\nparallel = True\npatch = subprocess\n"
+
+
+def has_coverage_config(package: Path) -> bool:
+    """Does the project carry its own coverage.py configuration?"""
+
+    if os.environ.get("COVERAGE_RCFILE") or (package / ".coveragerc").is_file():
+        return True
+    for name, section in (
+        ("pyproject.toml", "[tool.coverage"),
+        ("setup.cfg", "[coverage:"),
+        ("tox.ini", "[coverage:"),
+    ):
+        path = package / name
+        if path.is_file() and section in path.read_text(encoding="utf-8", errors="replace"):
+            return True
+    return False
+
+
+def _subprocess_rcfile(py: str, package: Path, directory: Path) -> tuple[bool, Path | None]:
+    """Prepare the coverage configuration that measures child processes.
+
+    Returns (usable, rcfile). A project's own configuration is never edited or
+    replaced: it must enable `patch = subprocess` itself and rcfile is None.
+    Without one, crapper writes a configuration that does and returns its path.
+    """
+
+    own = has_coverage_config(package)
+    probe = run_shell([py, "-c", _VERSION_PROBE], package)
+    if probe == 0 and own:
+        probe = run_shell([py, "-c", _PATCH_PROBE], package)
+    if probe == _PROBE_TOO_OLD:
+        _warn(
+            "--python-subprocess-coverage needs coverage.py "
+            f"{'.'.join(map(str, _SUBPROCESS_MIN_VERSION))} or newer in {py}. "
+            "Upgrade coverage there."
+        )
+        return False, None
+    if probe == _PROBE_NO_PATCH:
+        _warn(
+            f"{package} has its own coverage configuration, which crapper does not edit. "
+            "Add `patch = subprocess` to its [run] section ([tool.coverage.run] in "
+            "pyproject.toml) for --python-subprocess-coverage."
+        )
+        return False, None
+    if probe != 0:
+        _warn(f"Checking coverage.py in {py} exited {probe}.")
+        return False, None
+    if own:
+        return True, None
+    rcfile = directory / ".coveragerc"
+    rcfile.write_text(_SUBPROCESS_RCFILE, encoding="utf-8")
+    return True, rcfile
 
 
 def _ensure_python_module(py: str, package: Path, module: str) -> bool:
@@ -528,7 +611,13 @@ def _record_python_lcov(
         _warn(f"Python tests exited {code} in {package}. Coverage was still recorded.")
 
 
-def _cover_python(root: Path, files: list[Path]) -> None:
+def _combine_python_data(py: str, package: Path, data_file: Path) -> None:
+    code = run_shell(python_combine_command(py, data_file), package)
+    if code != 0:
+        _warn(f"coverage combine exited {code} in {package}. Python coverage will score 0%.")
+
+
+def _cover_python(root: Path, files: list[Path], subprocesses: bool = False) -> None:
     for package in python_roots(root, files):
         report = _coverage_report(root, package, "python")
         py = _python_executable(package)
@@ -539,10 +628,26 @@ def _cover_python(root: Path, files: list[Path]) -> None:
         data_file = report.parent / ".coverage"
         report.unlink(missing_ok=True)
         data_file.unlink(missing_ok=True)
+        rcfile = None
+        if subprocesses:
+            for stale in report.parent.glob(".coverage.*"):
+                stale.unlink()
+            usable, rcfile = _subprocess_rcfile(py, package, report.parent)
+            if not usable:
+                _warn(f"Python coverage will score 0% in {package}.")
+                continue
         run_cmd, lcov_cmd = python_coverage_commands(
-            py, _python_kind(py, package), data_file, report, python_sources(package, files)
+            py,
+            _python_kind(py, package),
+            data_file,
+            report,
+            python_sources(package, files),
+            rcfile,
         )
-        _record_python_lcov(package, run_shell(run_cmd, package), data_file, lcov_cmd)
+        code = run_shell(run_cmd, package)
+        if subprocesses:
+            _combine_python_data(py, package, data_file)
+        _record_python_lcov(package, code, data_file, lcov_cmd)
 
 
 def _cover_rust(root: Path, files: list[Path]) -> None:
@@ -562,8 +667,12 @@ def _cover_rust(root: Path, files: list[Path]) -> None:
             _warn(f"Rust coverage exited {code} in {module}. Rust coverage will score 0%.")
 
 
-def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
+def run_coverage(
+    root: Path, files: list[Path], command: str | None, python_subprocesses: bool = False
+) -> int:
     """Generate coverage reports for the languages present in `files`.
+
+    `python_subprocesses` also measures Python child processes started by the tests.
 
     Returns the custom command's status. A non-zero status means the caller
     must not read reports already on disk. Per-language runs return 0; a
@@ -590,7 +699,7 @@ def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
     if "typescript" in languages:
         _cover_typescript(root, files)
     if "python" in languages:
-        _cover_python(root, files)
+        _cover_python(root, files, python_subprocesses)
     if "rust" in languages:
         _cover_rust(root, files)
     return 0
