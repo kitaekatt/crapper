@@ -340,10 +340,11 @@ def python_roots(root: Path, files: list[Path], tests: str | None = None) -> lis
 
 
 _SYSTEM_PYTHON = "python3"
+_PROJECT_VENV_PYTHONS = (".venv/bin/python", "venv/bin/python")
 
 
 def _python_executable(package: Path) -> str:
-    for relative in (".venv/bin/python", "venv/bin/python"):
+    for relative in _PROJECT_VENV_PYTHONS:
         candidate = package / relative
         if candidate.is_file():
             return str(candidate)
@@ -498,19 +499,31 @@ def python_install_command(py: str, module: str, installer: str = "pip") -> list
     return [py, "-m", "pip", "install", "--disable-pip-version-check", module]
 
 
+def _is_project_venv(py: str, package: Path) -> bool:
+    return py in {str(package / relative) for relative in _PROJECT_VENV_PYTHONS}
+
+
+def _manual_install_hint(py: str, module: str, installer: str) -> str:
+    if installer == "uv":
+        return f"uv pip install --python {py} {module}"
+    return f"{py} -m pip install {module}"
+
+
 def _ensure_python_module(py: str, package: Path, module: str, installer: str = "pip") -> bool:
     """Import `module`, installing it only into a project virtual environment.
 
-    The `python3` fallback is the user's own interpreter, so a missing module
-    is reported there and never installed.
+    Any other interpreter, such as the `python3` fallback, belongs to the user,
+    so a missing module is reported there and never installed, whichever
+    installer was chosen.
     """
 
     if run_shell([py, "-c", f"import {module}"], package) == 0:
         return True
-    if py == _SYSTEM_PYTHON:
+    if not _is_project_venv(py, package):
         _warn(
             f"{module} is not installed in {py}, and crapper does not install packages "
-            f"outside a project virtual environment. Run `{py} -m pip install {module}`, "
+            "outside a project virtual environment. "
+            f"Run `{_manual_install_hint(py, module, installer)}`, "
             f"or create a .venv in {package}."
         )
         return False

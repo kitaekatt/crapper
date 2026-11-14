@@ -912,3 +912,34 @@ def test_a_function_run_only_by_a_child_process_is_covered_only_with_the_option(
     assert _lcov_hits(lcov, "work.py") == {1: 0, 2: 0}
     run_coverage(tmp_path, [source], None, python_subprocesses=True)
     assert _lcov_hits(lcov, "work.py") == {1: 1, 2: 1}
+
+
+@pytest.mark.parametrize("installer", ["pip", "uv"])
+def test_no_installer_installs_into_an_interpreter_that_is_not_a_project_venv(
+    tmp_path, monkeypatch, installer
+):
+    commands = []
+
+    def shell(command, _cwd):
+        commands.append(_as_text(command))
+        return 1 if "-c import" in _as_text(command) else 0
+
+    monkeypatch.setattr("crapper.runners.run_shell", shell)
+    monkeypatch.setattr("crapper.runners.shutil.which", lambda _name: "/bin/uv")
+    for py in ("python3", "/usr/bin/python3", str(tmp_path / "elsewhere" / "bin" / "python")):
+        commands.clear()
+        assert _ensure_python_module(py, tmp_path, "coverage", installer) is False
+        assert commands == [f"{py} -c import coverage"]
+
+
+def test_the_refusal_outside_a_project_venv_names_the_chosen_installer(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, _cwd: 1)
+    monkeypatch.setattr("crapper.runners.shutil.which", lambda _name: "/bin/uv")
+    assert _ensure_python_module("python3", tmp_path, "coverage", "uv") is False
+    err = capsys.readouterr().err
+    assert "uv pip install --python python3 coverage" in err
+    assert "-m pip" not in err
+    assert _ensure_python_module("python3", tmp_path, "coverage", "pip") is False
+    assert "python3 -m pip install coverage" in capsys.readouterr().err
