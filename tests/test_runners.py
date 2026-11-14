@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,8 @@ from crapper.runners import (
     _restore_manifests,
     _rust_kind,
     _vitest_version,
+    has_coverage_config,
+    python_combine_command,
     python_coverage_commands,
     python_roots,
     python_sources,
@@ -602,9 +605,9 @@ def test_python_test_dir_collapses_the_run_into_the_project_root(tmp_path):
 
 
 def test_python_test_dir_is_the_pytest_and_unittest_target():
-    run, _lcov = python_coverage_commands("py", "pytest", Path("data"), Path("out"), "src", "tests/demo")
+    run, _lcov = python_coverage_commands("py", "pytest", Path("data"), Path("out"), "src", tests="tests/demo")
     assert _as_text(run).endswith("-m pytest tests/demo")
-    run, _lcov = python_coverage_commands("py", "unittest", Path("data"), Path("out"), "src", "tests/demo")
+    run, _lcov = python_coverage_commands("py", "unittest", Path("data"), Path("out"), "src", tests="tests/demo")
     assert _as_text(run).endswith("-m unittest discover -s tests/demo")
 
 
@@ -717,3 +720,195 @@ def test_the_installer_reaches_the_python_module_installs(tmp_path, monkeypatch)
     installs.clear()
     assert _python_kind("python3", tmp_path, installer="uv") == "unittest"
     assert installs == [("pytest", "uv")]
+
+
+def _python_project(tmp_path, pyproject="[tool.pytest.ini_options]\n"):
+    _write(tmp_path, "pyproject.toml", pyproject)
+    return _write(tmp_path, "app/work.py", "def run():\n    return 1\n")
+
+
+def _record_shell(monkeypatch, probe_code=0, patch_code=0, combine_code=0):
+    """Fake run_shell. The coverage.py version probe exits with `probe_code`, and
+    the probe of a project's own configuration with `patch_code`."""
+
+    calls = []
+
+    def shell(command, cwd):
+        text = _as_text(command)
+        calls.append(text)
+        if "version_info" in text:
+            return probe_code
+        if "get_option" in text:
+            return patch_code
+        if " combine " in text:
+            if combine_code == 0:
+                Path(text.split("--data-file=")[1]).write_text("data", encoding="utf-8")
+            return combine_code
+        return 0
+
+    monkeypatch.setattr("crapper.runners.run_shell", shell)
+    return calls
+
+
+def test_a_run_without_subprocess_coverage_is_unchanged(tmp_path, monkeypatch):
+    calls = _record_shell(monkeypatch)
+    source = _python_project(tmp_path)
+    run_coverage(tmp_path, [source], None)
+    data = tmp_path.resolve() / "target/coverage/python/.coverage"
+    assert f"python3 -m coverage run --data-file={data} --source=app -m pytest" in calls
+    assert not any("combine" in call or "rcfile" in call or "version_info" in call for call in calls)
+    assert not (tmp_path / "target/coverage/python/.coveragerc").exists()
+
+
+def test_subprocess_coverage_commands_name_the_rcfile_before_the_data_file():
+    run, _lcov = python_coverage_commands(
+        "py", "pytest", Path("data"), Path("out"), "src", rcfile=Path("rc")
+    )
+    assert _as_text(run) == "py -m coverage run --rcfile=rc --data-file=data --source=src -m pytest"
+    assert python_combine_command("py", Path("data")) == [
+        "py",
+        "-m",
+        "coverage",
+        "combine",
+        "--data-file=data",
+    ]
+
+
+def test_subprocess_coverage_supplies_its_own_configuration_when_the_project_has_none(
+    tmp_path, monkeypatch
+):
+    calls = _record_shell(monkeypatch)
+    source = _python_project(tmp_path)
+    run_coverage(tmp_path, [source], None, python_subprocesses=True)
+    report = tmp_path.resolve() / "target/coverage/python"
+    rcfile = report / ".coveragerc"
+    assert rcfile.read_text(encoding="utf-8") == "[run]\nparallel = True\npatch = subprocess\n"
+    steps = ("version_info", "coverage run", " combine ", "coverage lcov")
+    seen = [step for call in calls for step in steps if step in call]
+    assert seen == list(steps)
+    run_call = next(call for call in calls if "coverage run" in call)
+    assert f"--rcfile={rcfile} --data-file={report / '.coverage'}" in run_call
+    assert f"python3 -m coverage combine --data-file={report / '.coverage'}" in calls
+
+
+def test_subprocess_coverage_leaves_a_project_coverage_configuration_in_charge(
+    tmp_path, monkeypatch
+):
+    calls = _record_shell(monkeypatch)
+    source = _python_project(
+        tmp_path, "[tool.coverage.run]\nbranch = true\npatch = ['subprocess']\n"
+    )
+    run_coverage(tmp_path, [source], None, python_subprocesses=True)
+    run_call = next(call for call in calls if "coverage run" in call)
+    assert "--rcfile" not in run_call
+    assert any(" combine " in call for call in calls)
+    assert not (tmp_path / "target/coverage/python/.coveragerc").exists()
+    assert any("get_option" in call for call in calls)
+
+
+def test_subprocess_coverage_asks_a_project_configuration_to_enable_the_patch(
+    tmp_path, monkeypatch, capsys
+):
+    calls = _record_shell(monkeypatch, patch_code=4)
+    source = _python_project(tmp_path, "[tool.coverage.run]\nbranch = true\n")
+    run_coverage(tmp_path, [source], None, python_subprocesses=True)
+    assert not any("coverage run" in call or "combine" in call for call in calls)
+    err = capsys.readouterr().err
+    assert "patch = subprocess" in err
+    assert "does not edit" in err
+    assert "Python coverage will score 0%" in err
+
+
+def test_subprocess_coverage_refuses_a_coverage_py_that_is_too_old(tmp_path, monkeypatch, capsys):
+    calls = _record_shell(monkeypatch, probe_code=3)
+    source = _python_project(tmp_path)
+    run_coverage(tmp_path, [source], None, python_subprocesses=True)
+    assert not any("coverage run" in call or "combine" in call for call in calls)
+    err = capsys.readouterr().err
+    assert "--python-subprocess-coverage needs coverage.py 7.10.6 or newer" in err
+    assert "Python coverage will score 0%" in err
+
+
+def test_subprocess_coverage_detects_each_kind_of_project_configuration(tmp_path, monkeypatch):
+    monkeypatch.delenv("COVERAGE_RCFILE", raising=False)
+    assert has_coverage_config(tmp_path) is False
+    _write(tmp_path, "pyproject.toml", "[tool.pytest.ini_options]\n")
+    _write(tmp_path, "setup.cfg", "[metadata]\nname = x\n")
+    assert has_coverage_config(tmp_path) is False
+    _write(tmp_path, "pyproject.toml", "[tool.coverage.run]\nbranch = true\n")
+    assert has_coverage_config(tmp_path) is True
+    (tmp_path / "pyproject.toml").unlink()
+    _write(tmp_path, "setup.cfg", "[coverage:run]\nbranch = True\n")
+    assert has_coverage_config(tmp_path) is True
+    (tmp_path / "setup.cfg").unlink()
+    _write(tmp_path, "tox.ini", "[coverage:run]\nbranch = True\n")
+    assert has_coverage_config(tmp_path) is True
+    (tmp_path / "tox.ini").unlink()
+    _write(tmp_path, ".coveragerc", "")
+    assert has_coverage_config(tmp_path) is True
+    (tmp_path / ".coveragerc").unlink()
+    monkeypatch.setenv("COVERAGE_RCFILE", "elsewhere.ini")
+    assert has_coverage_config(tmp_path) is True
+
+
+def test_subprocess_coverage_removes_data_files_left_by_an_earlier_run(tmp_path, monkeypatch):
+    _record_shell(monkeypatch)
+    source = _python_project(tmp_path)
+    stale = _write(tmp_path, "target/coverage/python/.coverage.host.1.abc", "old")
+    run_coverage(tmp_path, [source], None, python_subprocesses=True)
+    assert not stale.exists()
+
+
+def test_a_failed_combine_is_reported(tmp_path, monkeypatch, capsys):
+    _record_shell(monkeypatch, combine_code=1)
+    source = _python_project(tmp_path)
+    run_coverage(tmp_path, [source], None, python_subprocesses=True)
+    err = capsys.readouterr().err
+    assert "coverage combine exited 1" in err
+    assert "Python coverage will score 0%" in err
+
+
+def _lcov_hits(lcov: Path, name: str) -> dict[int, int]:
+    hits: dict[int, int] = {}
+    current = ""
+    for line in lcov.read_text(encoding="utf-8").splitlines():
+        if line.startswith("SF:"):
+            current = line[3:]
+        elif line.startswith("DA:") and current.endswith(name):
+            number, count = line[3:].split(",")[:2]
+            hits[int(number)] = int(count)
+    return hits
+
+
+def test_a_function_run_only_by_a_child_process_is_covered_only_with_the_option(
+    tmp_path, monkeypatch
+):
+    coverage = pytest.importorskip("coverage")
+    if coverage.version_info < (7, 10, 6):
+        pytest.skip("--python-subprocess-coverage needs coverage.py 7.10.6")
+    pytest.importorskip("pytest")
+    monkeypatch.setattr("crapper.runners._python_executable", lambda _package: sys.executable)
+    _write(tmp_path, "pyproject.toml", "[tool.pytest.ini_options]\n")
+    _write(tmp_path, "app/__init__.py", "")
+    source = _write(tmp_path, "app/work.py", "def only_in_child():\n    return 41 + 1\n")
+    _write(
+        tmp_path,
+        "app/cli.py",
+        "from app.work import only_in_child\n\nif __name__ == '__main__':\n"
+        "    print(only_in_child())\n",
+    )
+    _write(
+        tmp_path,
+        "tests/test_cli.py",
+        "import subprocess, sys\nfrom pathlib import Path\n\n"
+        "def test_child():\n"
+        "    root = Path(__file__).resolve().parents[1]\n"
+        "    out = subprocess.run([sys.executable, '-m', 'app.cli'], cwd=root,\n"
+        "                         capture_output=True, text=True, check=True)\n"
+        "    assert out.stdout.strip() == '42'\n",
+    )
+    lcov = tmp_path / "target/coverage/python/lcov.info"
+    run_coverage(tmp_path, [source], None)
+    assert _lcov_hits(lcov, "work.py") == {1: 0, 2: 0}
+    run_coverage(tmp_path, [source], None, python_subprocesses=True)
+    assert _lcov_hits(lcov, "work.py") == {1: 1, 2: 1}

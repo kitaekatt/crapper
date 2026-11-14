@@ -65,6 +65,12 @@ Options:
   --python-installer <pip|uv>   Install a missing coverage or pytest into the
                                 project's Python with pip or with
                                 `uv pip install --python`. Default: pip.
+  --python-subprocess-coverage  Also measure Python child processes that the
+                                tests start (coverage.py patch = subprocess;
+                                needs coverage.py 7.10.6 or newer). A project's
+                                own coverage configuration is not edited and
+                                must set patch = subprocess itself. Not with
+                                --coverage-command.
   --threshold <number>          Exit 2 when the worst CRAP score is above this.
 
 Arguments:
@@ -107,6 +113,7 @@ class Options:
     coverage_command: str | None = None
     python_test_dir: str | None = None
     python_installer: str = "pip"
+    python_subprocess_coverage: bool = False
     threshold: float | None = None
     changed: bool = False
 
@@ -165,6 +172,10 @@ def parse_args(argv: list[str] | None = None) -> Options:
                 options.use_existing_coverage = True
                 index += 1
                 continue
+            if arg == "--python-subprocess-coverage":
+                options.python_subprocess_coverage = True
+                index += 1
+                continue
             if arg == "--changed":
                 options.changed = True
                 index += 1
@@ -185,6 +196,15 @@ def parse_args(argv: list[str] | None = None) -> Options:
         return Options(
             action="help",
             message=f"--python-test-dir cannot be combined with --coverage-command\n\n{HELP}",
+            exit_code=1,
+        )
+    if options.python_subprocess_coverage and options.coverage_command:
+        return Options(
+            action="help",
+            message=(
+                "--python-subprocess-coverage cannot be combined with "
+                f"--coverage-command\n\n{HELP}"
+            ),
             exit_code=1,
         )
     return options
@@ -317,6 +337,7 @@ def _coverage_bundle(options: Options, root: Path, files: list[Path]):
         options.coverage_command,
         python_tests=options.python_test_dir,
         python_installer=options.python_installer,
+        python_subprocesses=options.python_subprocess_coverage,
     )
     if options.coverage_command and status not in (0, None):
         return CoverageBundle()

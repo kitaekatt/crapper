@@ -30,6 +30,7 @@ The first run creates `.venv` and installs the tool. From a project root it walk
 ./crapper --threshold 30                 # exit 2 when the worst score is higher
 ./crapper --python-test-dir tests        # Python tests live outside each source tree
 ./crapper --python-installer uv          # install missing Python test tools with uv, not pip
+./crapper --python-subprocess-coverage   # Python code that tests run in a child process counts as covered
 ```
 
 ## Snapshot
@@ -72,6 +73,8 @@ Rust counts `if`, loops, each `match` arm, `?`, and `&&` / `||`. `mod tests` is 
 Python counts `if`, `elif`, `for`, `while`, `except`, each `match` case, a comprehension filter, a conditional expression, and each `and` / `or`. Nested functions stay inside the enclosing function. Coverage is LCOV from `coverage.py`, running pytest when the project uses it and `unittest` otherwise. When the project has a `.venv` or `venv`, `coverage` and `pytest` are installed into it if they are missing, with `pip` by default. A virtual environment made by `uv venv` has no `pip`, so `--python-installer uv` installs them with `uv pip install --python <interpreter>` instead. `uv` must be on `PATH`; if it is not, nothing is installed and Python scores 0% with a message that says so. The option is read only when something is missing, and accepts `pip` or `uv`. Without a project virtual environment, crapper uses `python3` as it finds it and never installs into it: a missing `coverage` scores Python at 0%, a missing `pytest` falls back to `unittest`, and the warning names the package to install.
 
 Python tests run from the nearest directory that holds `pyproject.toml`, `setup.cfg`, `setup.py`, `pytest.ini`, or `tox.ini`, which is wrong when the tests sit in a separate tree, such as `plugins/<name>/` for sources and `tests/<name>/` for tests. `--python-test-dir <path>` names the test directory, relative to `--root`. Python coverage then runs once from the project root, with pytest or `unittest discover` pointed at that directory, and a `conftest.py` inside it selects pytest. It cannot be combined with `--coverage-command`.
+
+Code that the tests run only in a child Python process, such as a command-line tool under test launched with `subprocess`, is reported at 0% by default, because `coverage run` measures only its own process. `--python-subprocess-coverage` turns on coverage.py's `patch = subprocess` setting, which measures the children into per-process data files, then runs `coverage combine` before writing the same LCOV report. It needs coverage.py 7.10.6 or newer in the project's interpreter, and fails with a message that says so when it is older. A project that has no coverage.py configuration of its own gets one generated at `target/coverage/python/.coveragerc` (`parallel = True`, `patch = subprocess`). crapper never edits or replaces a project's own configuration (`.coveragerc`, `setup.cfg` or `tox.ini` with a `[coverage:` section, `[tool.coverage` in `pyproject.toml`, or `COVERAGE_RCFILE`), so such a project must set `patch = subprocess` in its `[run]` section itself; without it, crapper says so and scores Python at 0%. It cannot be combined with `--coverage-command`.
 
 ## Coverage commands
 
