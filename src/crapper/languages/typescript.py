@@ -329,6 +329,31 @@ def _append_arrows(found, data, node, module, path) -> None:
         )
 
 
+def _append_default_export(found, data, node, module, path) -> None:
+    if not any(child.type == "default" for child in node.children):
+        return
+    value = child_of_type(
+        node, "arrow_function", "function_expression", "function_declaration"
+    )
+    if value is None:
+        return
+    if value.type == "function_declaration" and child_of_type(value, "identifier"):
+        return
+    if value.type != "arrow_function" and not _has_body(value):
+        return
+    _append(
+        found,
+        value,
+        name="<default>",
+        namespace=module,
+        complexity=_complexity(data, value),
+        start_line=start_line(value),
+        end_line=end_line(value),
+        path=path,
+        language="typescript",
+    )
+
+
 def _route_label(method: str, path: str | None) -> str:
     label = method.upper()
     if path:
@@ -392,6 +417,8 @@ def functions_in_source(
             _append_method(found, data, node, module, path)
         elif node.type == "lexical_declaration":
             _append_arrows(found, data, node, module, path)
+        elif node.type == "export_statement":
+            _append_default_export(found, data, node, module, path)
         elif node.type == "call_expression":
             _collect_routes(routes, data, node)
     _append_routes(found, routes, data, module, path)

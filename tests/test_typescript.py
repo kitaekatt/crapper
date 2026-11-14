@@ -132,3 +132,44 @@ app.get("/users", (req, res) => req.id ?? 0);
         ("choose", 7),
         ("GET /users", 2),
     ]
+
+
+def test_default_export_anonymous_functions_are_scored_as_default():
+    for header in (
+        "export default async (req) =>",
+        "export default (req) =>",
+        "export default async function (req)",
+        "export default function (req)",
+    ):
+        arrow = "=>" in header
+        body = " {" if arrow else " {"
+        source = f"""
+const helper = (n) => (n ? 1 : 0);
+{header}{body}
+  if (req.a && req.b) return 1;
+  for (const x of req.xs) {{ if (x) return 2; }}
+  return 0;
+}}
+"""
+        functions = functions_in_source(source, "api/vote.js", "/proj")
+        assert [(fn.name, fn.complexity) for fn in functions] == [
+            ("helper", 2),
+            ("<default>", 5),
+        ], header
+        assert functions[1].path == "api/vote.js"
+        assert functions[1].start_line == 3
+
+
+def test_named_default_export_keeps_its_name_and_top_level_code_is_not_scored():
+    source = """
+if (process.env.X) { console.log(1); }
+export default function named(a) { return a ? 1 : 0; }
+"""
+    functions = functions_in_source(source, "api/x.js", "/proj")
+    assert [fn.name for fn in functions] == ["named"]
+
+
+def test_default_export_of_a_nested_function_is_not_double_counted():
+    source = "export default async (req) => { const f = () => 1; return f(); }\n"
+    functions = functions_in_source(source, "api/y.ts", "/proj")
+    assert [fn.name for fn in functions] == ["<default>"]
