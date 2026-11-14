@@ -58,6 +58,12 @@ Options:
   --use-existing-coverage       Read coverage already on disk. Do not rerun tests.
   --coverage-command <cmd>      Run this command instead of the per-language
                                 coverage tools, then read the reports it wrote.
+  --python-subprocess-coverage  Also measure Python child processes that the
+                                tests start (coverage.py patch = subprocess;
+                                needs coverage.py 7.10.6 or newer). A project's
+                                own coverage configuration is not edited and
+                                must set patch = subprocess itself. Not with
+                                --coverage-command.
   --threshold <number>          Exit 2 when the worst CRAP score is above this.
 
 Arguments:
@@ -98,6 +104,7 @@ class Options:
     no_coverage: bool = False
     use_existing_coverage: bool = False
     coverage_command: str | None = None
+    python_subprocess_coverage: bool = False
     threshold: float | None = None
     changed: bool = False
 
@@ -145,6 +152,10 @@ def parse_args(argv: list[str] | None = None) -> Options:
                 options.use_existing_coverage = True
                 index += 1
                 continue
+            if arg == "--python-subprocess-coverage":
+                options.python_subprocess_coverage = True
+                index += 1
+                continue
             if arg == "--changed":
                 options.changed = True
                 index += 1
@@ -159,6 +170,15 @@ def parse_args(argv: list[str] | None = None) -> Options:
         return Options(
             action="help",
             message=f"--no-coverage cannot be combined with --coverage-command\n\n{HELP}",
+            exit_code=1,
+        )
+    if options.python_subprocess_coverage and options.coverage_command:
+        return Options(
+            action="help",
+            message=(
+                "--python-subprocess-coverage cannot be combined with "
+                f"--coverage-command\n\n{HELP}"
+            ),
             exit_code=1,
         )
     return options
@@ -285,7 +305,9 @@ def _coverage_bundle(options: Options, root: Path, files: list[Path]):
         return None
     if options.use_existing_coverage:
         return load_bundle(root)
-    status = run_coverage(root, files, options.coverage_command)
+    status = run_coverage(
+        root, files, options.coverage_command, options.python_subprocess_coverage
+    )
     if options.coverage_command and status not in (0, None):
         return CoverageBundle()
     return load_bundle(root)

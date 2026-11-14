@@ -399,3 +399,34 @@ def test_main_exits_with_the_status(monkeypatch):
         assert exc.code == 4
     else:
         raise AssertionError("main did not exit")
+
+
+def test_python_subprocess_coverage_option_is_off_by_default():
+    assert parse_args([]).python_subprocess_coverage is False
+    assert parse_args(["--python-subprocess-coverage"]).python_subprocess_coverage is True
+
+
+def test_python_subprocess_coverage_cannot_be_combined_with_a_coverage_command():
+    conflict = parse_args(["--python-subprocess-coverage", "--coverage-command", "true"])
+    assert conflict.exit_code == 1
+    assert (
+        "--python-subprocess-coverage cannot be combined with --coverage-command"
+        in conflict.message
+    )
+
+
+def test_python_subprocess_coverage_reaches_the_coverage_run(tmp_path, monkeypatch):
+    _write(tmp_path, "src/app.py", "def run():\n    return 1\n")
+    called = []
+    monkeypatch.setattr("crapper.cli.run_coverage", lambda *args: called.append(args))
+    assert run(["--root", str(tmp_path), "--python-subprocess-coverage"]) == 0
+    assert called[0][3] is True
+    called.clear()
+    assert run(["--root", str(tmp_path)]) == 0
+    assert called[0][3] is False
+
+
+def test_help_documents_the_python_subprocess_coverage():
+    help_text = parse_args(["--help"]).message
+    assert "--python-subprocess-coverage" in help_text
+    assert "7.10.6" in help_text
