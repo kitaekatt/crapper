@@ -387,18 +387,31 @@ def python_coverage_commands(
     return run, lcov
 
 
-def _ensure_python_module(py: str, package: Path, module: str) -> bool:
+PYTHON_INSTALLERS = ("pip", "uv")
+
+
+def python_install_command(py: str, module: str, installer: str = "pip") -> list[str]:
+    """The command that installs `module` into the interpreter `py`."""
+
+    if installer == "uv":
+        return ["uv", "pip", "install", "--python", py, module]
+    return [py, "-m", "pip", "install", "--disable-pip-version-check", module]
+
+
+def _ensure_python_module(py: str, package: Path, module: str, installer: str = "pip") -> bool:
     if run_shell([py, "-c", f"import {module}"], package) == 0:
         return True
+    if installer == "uv" and shutil.which("uv") is None:
+        _warn(
+            f"--python-installer uv was chosen, but `uv` is not on PATH, so {module} was "
+            "not installed. Install uv, or use --python-installer pip."
+        )
+        return False
     _warn(
         f"Installing {module} for Python coverage. "
         "The project requirements are left unchanged."
     )
-    code = run_shell(
-        [py, "-m", "pip", "install", "--disable-pip-version-check", module],
-        package,
-    )
-    return code == 0
+    return run_shell(python_install_command(py, module, installer), package) == 0
 
 
 def rust_coverage_command(kind: str, report: Path) -> list[str]:
@@ -505,10 +518,10 @@ def _needs_vitest_provider(command: list[str]) -> bool:
     return any(Path(part).name == "vitest" for part in command)
 
 
-def _python_kind(py: str, package: Path) -> str:
+def _python_kind(py: str, package: Path, installer: str = "pip") -> str:
     if not uses_pytest(package):
         return "unittest"
-    if _ensure_python_module(py, package, "pytest"):
+    if _ensure_python_module(py, package, "pytest", installer):
         return "pytest"
     _warn(f"pytest is missing in {package}. Falling back to unittest.")
     return "unittest"
@@ -528,11 +541,11 @@ def _record_python_lcov(
         _warn(f"Python tests exited {code} in {package}. Coverage was still recorded.")
 
 
-def _cover_python(root: Path, files: list[Path]) -> None:
+def _cover_python(root: Path, files: list[Path], installer: str = "pip") -> None:
     for package in python_roots(root, files):
         report = _coverage_report(root, package, "python")
         py = _python_executable(package)
-        if not _ensure_python_module(py, package, "coverage"):
+        if not _ensure_python_module(py, package, "coverage", installer):
             _warn(f"coverage is missing in {package}. Python coverage will score 0%.")
             continue
         report.parent.mkdir(parents=True, exist_ok=True)
@@ -540,7 +553,11 @@ def _cover_python(root: Path, files: list[Path]) -> None:
         report.unlink(missing_ok=True)
         data_file.unlink(missing_ok=True)
         run_cmd, lcov_cmd = python_coverage_commands(
-            py, _python_kind(py, package), data_file, report, python_sources(package, files)
+            py,
+            _python_kind(py, package, installer),
+            data_file,
+            report,
+            python_sources(package, files),
         )
         _record_python_lcov(package, run_shell(run_cmd, package), data_file, lcov_cmd)
 
@@ -562,8 +579,12 @@ def _cover_rust(root: Path, files: list[Path]) -> None:
             _warn(f"Rust coverage exited {code} in {module}. Rust coverage will score 0%.")
 
 
-def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
+def run_coverage(
+    root: Path, files: list[Path], command: str | None, python_installer: str = "pip"
+) -> int:
     """Generate coverage reports for the languages present in `files`.
+
+    `python_installer` ("pip" or "uv") installs a missing `coverage` or `pytest`.
 
     Returns the custom command's status. A non-zero status means the caller
     must not read reports already on disk. Per-language runs return 0; a
@@ -590,7 +611,7 @@ def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
     if "typescript" in languages:
         _cover_typescript(root, files)
     if "python" in languages:
-        _cover_python(root, files)
+        _cover_python(root, files, python_installer)
     if "rust" in languages:
         _cover_rust(root, files)
     return 0
