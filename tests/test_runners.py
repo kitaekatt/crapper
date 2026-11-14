@@ -589,3 +589,53 @@ def test_a_run_without_a_project_venv_never_runs_pip(tmp_path, monkeypatch, caps
     assert not any("pip" in command for command in commands)
     assert not any("coverage run" in command for command in commands)
     assert "Python coverage will score 0%" in capsys.readouterr().err
+
+
+def test_python_test_dir_collapses_the_run_into_the_project_root(tmp_path):
+    first = _write(tmp_path, "plugins/a/pyproject.toml", "[project]\nname = 'a'\n")
+    second = _write(tmp_path, "plugins/b/pyproject.toml", "[project]\nname = 'b'\n")
+    a = _write(tmp_path, "plugins/a/src/a.py", "def run():\n    return 1\n")
+    b = _write(tmp_path, "plugins/b/src/b.py", "def run():\n    return 1\n")
+    assert python_roots(tmp_path, [a, b]) == [first.parent.resolve(), second.parent.resolve()]
+    assert python_roots(tmp_path, [a, b], "tests") == [tmp_path.resolve()]
+    assert python_roots(tmp_path, [], "tests") == []
+
+
+def test_python_test_dir_is_the_pytest_and_unittest_target():
+    run, _lcov = python_coverage_commands("py", "pytest", Path("data"), Path("out"), "src", "tests/demo")
+    assert _as_text(run).endswith("-m pytest tests/demo")
+    run, _lcov = python_coverage_commands("py", "unittest", Path("data"), Path("out"), "src", "tests/demo")
+    assert _as_text(run).endswith("-m unittest discover -s tests/demo")
+
+
+def test_a_conftest_in_the_python_test_dir_means_pytest(tmp_path):
+    _write(tmp_path, "tests/conftest.py", "")
+    assert uses_pytest(tmp_path) is False
+    assert uses_pytest(tmp_path, "tests") is True
+    assert uses_pytest(tmp_path, "missing") is False
+
+
+def test_python_test_dir_runs_the_tests_once_from_the_project_root(tmp_path, monkeypatch):
+    calls = []
+
+    def shell(command, cwd):
+        calls.append((_as_text(command), cwd))
+        return 0
+
+    monkeypatch.setattr("crapper.runners.run_shell", shell)
+    _write(tmp_path, "pyproject.toml", "[tool.pytest.ini_options]\n")
+    _write(tmp_path, "plugins/a/pyproject.toml", "[project]\nname = 'a'\n")
+    _write(tmp_path, "plugins/b/pyproject.toml", "[project]\nname = 'b'\n")
+    files = [
+        _write(tmp_path, "plugins/a/a.py", "def run():\n    return 1\n"),
+        _write(tmp_path, "plugins/b/b.py", "def run():\n    return 1\n"),
+    ]
+    run_coverage(tmp_path, files, None, "tests")
+    runs = [(text, cwd) for text, cwd in calls if "coverage run" in text]
+    assert len(runs) == 1
+    text, cwd = runs[0]
+    assert cwd == tmp_path.resolve()
+    assert "--source=plugins" in text
+    assert text.endswith("-m pytest tests")
+    report = tmp_path / "target" / "coverage" / "python"
+    assert f"--data-file={report / '.coverage'}" in text

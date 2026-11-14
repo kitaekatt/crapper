@@ -399,3 +399,32 @@ def test_main_exits_with_the_status(monkeypatch):
         assert exc.code == 4
     else:
         raise AssertionError("main did not exit")
+
+
+def test_python_test_dir_option_is_read_and_defaults_to_none():
+    assert parse_args([]).python_test_dir is None
+    assert parse_args(["--python-test-dir", "tests"]).python_test_dir == "tests"
+    missing = parse_args(["--python-test-dir"])
+    assert missing.exit_code == 1
+    assert "--python-test-dir requires a value" in missing.message
+
+
+def test_python_test_dir_cannot_be_combined_with_a_coverage_command():
+    conflict = parse_args(["--python-test-dir", "tests", "--coverage-command", "true"])
+    assert conflict.exit_code == 1
+    assert "--python-test-dir cannot be combined with --coverage-command" in conflict.message
+
+
+def test_python_test_dir_reaches_the_coverage_run(tmp_path, monkeypatch):
+    _write(tmp_path, "src/app.py", "def run():\n    return 1\n")
+    called = []
+    monkeypatch.setattr("crapper.cli.run_coverage", lambda *args: called.append(args))
+    assert run(["--root", str(tmp_path), "--python-test-dir", "tests"]) == 0
+    assert called[0][2:] == (None, "tests")
+    called.clear()
+    assert run(["--root", str(tmp_path)]) == 0
+    assert called[0][2:] == (None, None)
+
+
+def test_help_documents_the_python_test_dir():
+    assert "--python-test-dir <path>" in parse_args(["--help"]).message

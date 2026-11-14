@@ -315,7 +315,13 @@ def _rust_kind() -> str | None:
 _PYTHON_MARKERS = ("pyproject.toml", "setup.cfg", "setup.py", "pytest.ini", "tox.ini")
 
 
-def python_roots(root: Path, files: list[Path]) -> list[Path]:
+def python_roots(root: Path, files: list[Path], tests: str | None = None) -> list[Path]:
+    """Directories to run Python tests from.
+
+    Each source file belongs to its nearest project marker. With `tests`, the
+    tests live outside those projects, so one run from `root` covers them all.
+    """
+
     found: set[Path] = set()
     root = root.resolve()
     for file in files:
@@ -327,6 +333,8 @@ def python_roots(root: Path, files: list[Path]) -> list[Path]:
             if module is not None:
                 break
         found.add((module or root).resolve())
+    if tests is not None and found:
+        return [root]
     return sorted(found)
 
 
@@ -341,8 +349,10 @@ def _python_executable(package: Path) -> str:
     return _SYSTEM_PYTHON
 
 
-def uses_pytest(package: Path) -> bool:
+def uses_pytest(package: Path, tests: str | None = None) -> bool:
     if (package / "pytest.ini").is_file() or (package / "conftest.py").is_file():
+        return True
+    if tests is not None and (package / tests / "conftest.py").is_file():
         return True
     for name in ("pyproject.toml", "setup.cfg", "tox.ini"):
         path = package / name
@@ -377,15 +387,17 @@ def _source_name(relative: Path) -> str:
 
 
 def python_coverage_commands(
-    py: str, kind: str, data_file: Path, report: Path, source: str
+    py: str, kind: str, data_file: Path, report: Path, source: str, tests: str | None = None
 ) -> tuple[list[str], list[str]]:
     run = [py, "-m", "coverage", "run", f"--data-file={data_file}"]
     if source:
         run.append(f"--source={source}")
     if kind == "pytest":
         run.extend(["-m", "pytest"])
+        if tests is not None:
+            run.append(tests)
     else:
-        run.extend(["-m", "unittest", "discover", "-s", "."])
+        run.extend(["-m", "unittest", "discover", "-s", tests or "."])
     lcov = [py, "-m", "coverage", "lcov", f"--data-file={data_file}", "-o", str(report)]
     return run, lcov
 
@@ -521,8 +533,8 @@ def _needs_vitest_provider(command: list[str]) -> bool:
     return any(Path(part).name == "vitest" for part in command)
 
 
-def _python_kind(py: str, package: Path) -> str:
-    if not uses_pytest(package):
+def _python_kind(py: str, package: Path, tests: str | None = None) -> str:
+    if not uses_pytest(package, tests):
         return "unittest"
     if _ensure_python_module(py, package, "pytest"):
         return "pytest"
@@ -544,8 +556,8 @@ def _record_python_lcov(
         _warn(f"Python tests exited {code} in {package}. Coverage was still recorded.")
 
 
-def _cover_python(root: Path, files: list[Path]) -> None:
-    for package in python_roots(root, files):
+def _cover_python(root: Path, files: list[Path], tests: str | None = None) -> None:
+    for package in python_roots(root, files, tests):
         report = _coverage_report(root, package, "python")
         py = _python_executable(package)
         if not _ensure_python_module(py, package, "coverage"):
@@ -556,7 +568,12 @@ def _cover_python(root: Path, files: list[Path]) -> None:
         report.unlink(missing_ok=True)
         data_file.unlink(missing_ok=True)
         run_cmd, lcov_cmd = python_coverage_commands(
-            py, _python_kind(py, package), data_file, report, python_sources(package, files)
+            py,
+            _python_kind(py, package, tests),
+            data_file,
+            report,
+            python_sources(package, files),
+            tests,
         )
         _record_python_lcov(package, run_shell(run_cmd, package), data_file, lcov_cmd)
 
@@ -578,8 +595,12 @@ def _cover_rust(root: Path, files: list[Path]) -> None:
             _warn(f"Rust coverage exited {code} in {module}. Rust coverage will score 0%.")
 
 
-def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
+def run_coverage(
+    root: Path, files: list[Path], command: str | None, python_tests: str | None = None
+) -> int:
     """Generate coverage reports for the languages present in `files`.
+
+    `python_tests` names the Python test directory, relative to `root`.
 
     Returns the custom command's status. A non-zero status means the caller
     must not read reports already on disk. Per-language runs return 0; a
@@ -606,7 +627,7 @@ def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
     if "typescript" in languages:
         _cover_typescript(root, files)
     if "python" in languages:
-        _cover_python(root, files)
+        _cover_python(root, files, python_tests)
     if "rust" in languages:
         _cover_rust(root, files)
     return 0
