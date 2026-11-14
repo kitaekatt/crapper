@@ -21,6 +21,14 @@ EXTENSIONS = {
     ".rs": "rust",
     ".py": "python",
     ".gd": "gdscript",
+    ".cpp": "cpp",
+    ".cc": "cpp",
+    ".cxx": "cpp",
+    ".c++": "cpp",
+    ".h": "cpp",
+    ".hpp": "cpp",
+    ".hh": "cpp",
+    ".hxx": "cpp",
 }
 
 SKIP_DIRS = {

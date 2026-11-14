@@ -10,6 +10,7 @@ _SOURCES = [
     ("python", "def run():\n    return 1\n", "src/app.py", "run"),
     ("rust", "pub fn open() {}\n", "src/lib.rs", "open"),
     ("gdscript", "func open():\n\tpass\n", "src/hero.gd", "open"),
+    ("cpp", "void open() {}\n", "src/lib.cpp", "open"),
 ]
 
 

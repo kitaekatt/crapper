@@ -1,6 +1,6 @@
 # crapper
 
-CRAP scores for Clojure, Java, Go, TypeScript, Rust, Python, and GDScript. One run detects the language of each source file, applies that language's complexity and coverage rules, and writes the snapshot [uml-viewer](https://github.com/unclebob/uml-viewer) already reads.
+CRAP scores for Clojure, Java, Go, TypeScript, Rust, Python, GDScript, and C++. One run detects the language of each source file, applies that language's complexity and coverage rules, and writes the snapshot [uml-viewer](https://github.com/unclebob/uml-viewer) already reads.
 
 The formula is the one from [crap4clj](https://github.com/unclebob/crap4clj), [crap4java](https://github.com/unclebob/crap4java), and [crap4go](https://github.com/unclebob/crap4go):
 
@@ -58,6 +58,7 @@ uml-viewer groups entries by `:namespace` and joins each operation on `:name`. E
 | Rust | `crate::module`, or `crate::module::Type` | the function or method name |
 | Python | the dotted module path, or `module.Class` | the function or method name |
 | GDScript | the dotted module path, or `module.Inner` | the function name |
+| C++ | the dotted module path plus any C++ namespaces | the function name, or `Class::method` |
 
 Rename or move is a new entry. There is no identity matching across runs.
 
@@ -74,6 +75,8 @@ TypeScript, TSX, and JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`) use the same str
 Rust counts `if`, loops, each `match` arm, `?`, and `&&` / `||`. `mod tests` is skipped. Coverage is LCOV from `cargo llvm-cov` or `cargo tarpaulin`, run in the nearest directory that contains `Cargo.toml`. When neither tool is installed, the run installs `cargo-llvm-cov`.
 
 GDScript (`.gd`) counts `if`, `elif`, `for`, `while`, each `match` arm, a conditional expression, and each `and` / `or`. Every named `func` is an entry, including `static func` and functions in inner `class` blocks; a lambda stays inside its enclosing function. There is no coverage runner: with coverage on, GDScript scores 0%, so use `--no-coverage` or `--coverage-command`.
+
+C++ (`.cpp` `.cc` `.cxx` `.c++` `.h` `.hpp` `.hh` `.hxx`) counts `if` (an `else if` once), `for`, range-for, `while`, `do`, each `case` and `default`, `catch`, `?:`, `goto`, and `&&` / `||` (or `and` / `or`). Entries are free functions, methods in a class body or out of line (`Class::method`), constructors, destructors, operators, and lambdas bound to a name, which are not also charged to the function that holds them. `.h` is read as C++ because the C++ grammar parses the C subset headers use and a header cannot be told apart from a C++ one by name; `.c` is not claimed. There is no coverage runner: with coverage on, C++ scores 0%, so use `--no-coverage` or `--coverage-command`.
 
 Python counts `if`, `elif`, `for`, `while`, `except`, each `match` case, a comprehension filter, a conditional expression, and each `and` / `or`. Nested functions stay inside the enclosing function. Coverage is LCOV from `coverage.py`, running pytest when the project uses it and `unittest` otherwise. When the project has a `.venv` or `venv`, `coverage` and `pytest` are installed into it if they are missing, with `pip` by default. A virtual environment made by `uv venv` has no `pip`, so `--python-installer uv` installs them with `uv pip install --python <interpreter>` instead. `uv` must be on `PATH`; if it is not, nothing is installed and Python scores 0% with a message that says so. The option is read only when something is missing, and accepts `pip` or `uv`. Without a project virtual environment, crapper uses `python3` as it finds it and never installs into it, whichever installer is chosen: a missing `coverage` scores Python at 0%, a missing `pytest` falls back to `unittest`, and the warning names the package and the command for the chosen installer.
 

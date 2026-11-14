@@ -2,6 +2,7 @@
 
 from crapper.languages.clojure import functions_in_source as clojure_functions
 from crapper.languages.gdscript import functions_in_source as gdscript_functions
+from crapper.languages.cpp import functions_in_source as cpp_functions
 from crapper.languages.golang import functions_in_source as go_functions
 from crapper.languages.java import functions_in_source as java_functions
 from crapper.languages.python import functions_in_source as python_functions
@@ -13,6 +14,7 @@ _READERS = {
     "clojure": clojure_functions,
     "java": java_functions,
     "gdscript": gdscript_functions,
+    "cpp": cpp_functions,
     "go": go_functions,
     "typescript": typescript_functions,
     "python": python_functions,

@@ -44,7 +44,8 @@ and prints a report sorted worst first.
 
 Languages: Clojure (.clj .cljc .cljs .bb), Java (.java), Go (.go),
 TypeScript and JavaScript (.ts .tsx .mts .cts .js .jsx .mjs .cjs),
-Rust (.rs), Python (.py), GDScript (.gd).
+Rust (.rs), Python (.py), GDScript (.gd),
+C++ (.cpp .cc .cxx .c++ .h .hpp .hh .hxx).
 
 Options:
   -h, --help                    Print this help and exit.
