@@ -8,7 +8,9 @@ Entries are free functions, methods defined in a class body or out of line
 (`auto f = [](...) {...};`, also as a class member). A named lambda is its own
 entry and is not also charged to the function that holds it. A method is named
 `Class::method`, with template arguments dropped from the qualifier. The
-namespace is the dotted module path plus the enclosing C++ namespaces.
+:namespace is the dotted module path alone, built as for Python and TypeScript
+(`kernel/src/routeEdge.cpp` is `routeEdge`). Enclosing C++ namespaces prefix
+the name: `woodkernel::Class::method`, `a::b::freeFn`.
 `.h` is read as C++: the grammar accepts the C subset that headers use.
 """
 
@@ -161,6 +163,6 @@ def functions_in_source(
         member = node.type == "function_definition" or node.parent.type == "field_declaration"
         if member and "::" not in name:
             name = "::".join([*types, name])
-        namespace = ".".join(filter(None, [module, *spaces]))
-        found.append(_entry(node, name, namespace, body, path, holder))
+        name = "::".join([*spaces, name])
+        found.append(_entry(node, name, module, body, path, holder))
     return found

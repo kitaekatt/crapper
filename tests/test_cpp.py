@@ -79,8 +79,10 @@ EXPECTED = [
 
 def test_every_branch_kind_and_function_kind():
     found = functions_in_source(SAMPLE, "src/demo/shape.cpp", "/proj")
-    assert [(fn.name, fn.complexity) for fn in found] == EXPECTED
-    assert {fn.namespace for fn in found} == {"demo.shape.geo"}
+    assert [(fn.name, fn.complexity) for fn in found] == [
+        (f"geo::{name}", cx) for name, cx in EXPECTED
+    ]
+    assert {fn.namespace for fn in found} == {"demo.shape"}
 
 
 def test_location_and_language_are_recorded():
@@ -88,9 +90,9 @@ def test_location_and_language_are_recorded():
     by_name = {}
     for fn in found:
         by_name.setdefault(fn.name, fn)
-    assert by_name["branchy"].start_line == 3
-    assert by_name["Shape::area"].start_line == 24
-    assert by_name["lam"].start_line == 41
+    assert by_name["geo::branchy"].start_line == 3
+    assert by_name["geo::Shape::area"].start_line == 24
+    assert by_name["geo::lam"].start_line == 41
     assert all(fn.language == "cpp" and fn.path == "src/demo/shape.cpp" for fn in found)
 
 
@@ -119,3 +121,27 @@ def test_dispatch_and_extensions(tmp_path):
 @pytest.mark.parametrize("source", ["", "// comment only\n", "int x;\nvoid decl();\n"])
 def test_no_definitions_no_functions(source):
     assert functions_in_source(source, "a.cpp") == []
+
+
+NESTED = """namespace woodkernel {
+namespace inner {
+int freeFn(int a) { return a ? 1 : 0; }
+}
+class Router {
+ public:
+  int route(int a) { if (a) return 1; return 0; }
+};
+int Router2::out(int a) { return a; }
+}
+int global(int a) { return a; }
+"""
+
+
+def test_namespace_is_path_style_module_and_cpp_namespaces_go_on_the_name():
+    found = functions_in_source(NESTED, "kernel/src/routeEdge.cpp", "/proj")
+    assert [(fn.namespace, fn.name) for fn in found] == [
+        ("routeEdge", "woodkernel::inner::freeFn"),
+        ("routeEdge", "woodkernel::Router::route"),
+        ("routeEdge", "woodkernel::Router2::out"),
+        ("routeEdge", "global"),
+    ]
