@@ -630,7 +630,7 @@ def test_python_test_dir_runs_the_tests_once_from_the_project_root(tmp_path, mon
         _write(tmp_path, "plugins/a/a.py", "def run():\n    return 1\n"),
         _write(tmp_path, "plugins/b/b.py", "def run():\n    return 1\n"),
     ]
-    run_coverage(tmp_path, files, None, "tests")
+    run_coverage(tmp_path, files, None, python_tests="tests")
     runs = [(text, cwd) for text, cwd in calls if "coverage run" in text]
     assert len(runs) == 1
     text, cwd = runs[0]
@@ -639,3 +639,81 @@ def test_python_test_dir_runs_the_tests_once_from_the_project_root(tmp_path, mon
     assert text.endswith("-m pytest tests")
     report = tmp_path / "target" / "coverage" / "python"
     assert f"--data-file={report / '.coverage'}" in text
+
+
+def test_python_installer_defaults_to_pip(tmp_path, monkeypatch):
+    commands = []
+
+    def shell(command, _cwd):
+        commands.append(command)
+        return 1 if "-c" in command else 0
+
+    monkeypatch.setattr("crapper.runners.run_shell", shell)
+    py = str(tmp_path / ".venv" / "bin" / "python")
+    assert _ensure_python_module(py, tmp_path, "coverage") is True
+    assert commands[-1] == [
+        py,
+        "-m",
+        "pip",
+        "install",
+        "--disable-pip-version-check",
+        "coverage",
+    ]
+
+
+def test_uv_installs_into_the_chosen_interpreter(tmp_path, monkeypatch):
+    commands = []
+
+    def shell(command, _cwd):
+        commands.append(command)
+        return 1 if "-c" in command else 0
+
+    monkeypatch.setattr("crapper.runners.run_shell", shell)
+    monkeypatch.setattr("crapper.runners.shutil.which", lambda _name: "/bin/uv")
+    py = str(tmp_path / ".venv" / "bin" / "python")
+    assert _ensure_python_module(py, tmp_path, "pytest", "uv") is True
+    assert commands[-1] == ["uv", "pip", "install", "--python", py, "pytest"]
+    assert not any("pip" in command[:3] and command[0] != "uv" for command in commands)
+
+
+def test_uv_that_is_not_on_the_path_is_an_error_and_never_falls_back_to_pip(
+    tmp_path, monkeypatch, capsys
+):
+    commands = []
+
+    def shell(command, _cwd):
+        commands.append(command)
+        return 1 if "-c" in command else 0
+
+    monkeypatch.setattr("crapper.runners.run_shell", shell)
+    monkeypatch.setattr("crapper.runners.shutil.which", lambda _name: None)
+    py = str(tmp_path / ".venv" / "bin" / "python")
+    assert _ensure_python_module(py, tmp_path, "coverage", "uv") is False
+    assert commands == [[py, "-c", "import coverage"]]
+    err = capsys.readouterr().err
+    assert "--python-installer uv" in err
+    assert "`uv` is not on PATH" in err
+
+
+def test_uv_is_not_needed_when_the_module_is_already_installed(tmp_path, monkeypatch):
+    monkeypatch.setattr("crapper.runners.run_shell", lambda *_args: 0)
+    monkeypatch.setattr("crapper.runners.shutil.which", lambda _name: None)
+    assert _ensure_python_module("python3", tmp_path, "coverage", "uv") is True
+
+
+def test_the_installer_reaches_the_python_module_installs(tmp_path, monkeypatch):
+    installs = []
+
+    def ensure(_py, _package, module, installer="pip"):
+        installs.append((module, installer))
+        return False
+
+    monkeypatch.setattr("crapper.runners._ensure_python_module", ensure)
+    monkeypatch.setattr("crapper.runners.run_shell", lambda *_args: 0)
+    _write(tmp_path, "pyproject.toml", "[tool.pytest.ini_options]\n")
+    source = _write(tmp_path, "src/app.py", "def run():\n    return 1\n")
+    run_coverage(tmp_path, [source], None, python_installer="uv")
+    assert installs == [("coverage", "uv")]
+    installs.clear()
+    assert _python_kind("python3", tmp_path, installer="uv") == "unittest"
+    assert installs == [("pytest", "uv")]

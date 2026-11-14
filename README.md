@@ -29,6 +29,7 @@ The first run creates `.venv` and installs the tool. From a project root it walk
 ./crapper combat                         # path fragment, same idea as crap4clj
 ./crapper --threshold 30                 # exit 2 when the worst score is higher
 ./crapper --python-test-dir tests        # Python tests live outside each source tree
+./crapper --python-installer uv          # install missing Python test tools with uv, not pip
 ```
 
 ## Snapshot
@@ -68,7 +69,7 @@ TypeScript, TSX, and JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`) use the same str
 
 Rust counts `if`, loops, each `match` arm, `?`, and `&&` / `||`. `mod tests` is skipped. Coverage is LCOV from `cargo llvm-cov` or `cargo tarpaulin`, run in the nearest directory that contains `Cargo.toml`. When neither tool is installed, the run installs `cargo-llvm-cov`.
 
-Python counts `if`, `elif`, `for`, `while`, `except`, each `match` case, a comprehension filter, a conditional expression, and each `and` / `or`. Nested functions stay inside the enclosing function. Coverage is LCOV from `coverage.py`, running pytest when the project uses it and `unittest` otherwise. When the project has a `.venv` or `venv`, `coverage` and `pytest` are installed into it if they are missing. Without one, crapper uses `python3` as it finds it and never installs into it: a missing `coverage` scores Python at 0%, a missing `pytest` falls back to `unittest`, and the warning names the package to install.
+Python counts `if`, `elif`, `for`, `while`, `except`, each `match` case, a comprehension filter, a conditional expression, and each `and` / `or`. Nested functions stay inside the enclosing function. Coverage is LCOV from `coverage.py`, running pytest when the project uses it and `unittest` otherwise. When the project has a `.venv` or `venv`, `coverage` and `pytest` are installed into it if they are missing, with `pip` by default. A virtual environment made by `uv venv` has no `pip`, so `--python-installer uv` installs them with `uv pip install --python <interpreter>` instead. `uv` must be on `PATH`; if it is not, nothing is installed and Python scores 0% with a message that says so. The option is read only when something is missing, and accepts `pip` or `uv`. Without a project virtual environment, crapper uses `python3` as it finds it and never installs into it: a missing `coverage` scores Python at 0%, a missing `pytest` falls back to `unittest`, and the warning names the package to install.
 
 Python tests run from the nearest directory that holds `pyproject.toml`, `setup.cfg`, `setup.py`, `pytest.ini`, or `tox.ini`, which is wrong when the tests sit in a separate tree, such as `plugins/<name>/` for sources and `tests/<name>/` for tests. `--python-test-dir <path>` names the test directory, relative to `--root`. Python coverage then runs once from the project root, with pytest or `unittest discover` pointed at that directory, and a `conftest.py` inside it selects pytest. It cannot be combined with `--coverage-command`.
 
