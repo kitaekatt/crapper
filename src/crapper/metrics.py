@@ -32,7 +32,8 @@ def render_edn(entries: list[Entry]) -> str:
 
     uml-viewer groups this file by `:namespace` and joins each operation on
     `:name`. Coverage is a percentage. `nil` coverage and CRAP mean `--no-coverage`.
-    A function absent from the report is `0.0`, not `nil`.
+    A function absent from the report is `0.0`, not `nil`. `:path` is relative to
+    the scanned root and `:line` is the 1-based start line of the function.
     """
 
     rows = []
@@ -43,7 +44,9 @@ def render_edn(entries: list[Entry]) -> str:
             f":namespace {_edn_string(entry.namespace)}, "
             f":complexity {entry.complexity}, "
             f":coverage {_edn_value(entry.coverage)}, "
-            f":crap {_edn_value(entry.crap)}"
+            f":crap {_edn_value(entry.crap)}, "
+            f":path {_edn_string(entry.path)}, "
+            f":line {entry.start_line}"
             "}"
         )
     body = "\n".join(rows)

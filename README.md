@@ -42,10 +42,12 @@ The first run creates `.venv` and installs the tool. From a project root it walk
             :namespace "demo.Board"
             :complexity 3
             :coverage 75.0
-            :crap 3.1}]}
+            :crap 3.1
+            :path "src/demo/board.clj"
+            :line 12}]}
 ```
 
-uml-viewer groups entries by `:namespace` and joins each operation on `:name`. `nil` coverage is what `--no-coverage` writes: complexity only, and CRAP is `nil` too. A function the coverage report does not mention scores 0%.
+uml-viewer groups entries by `:namespace` and joins each operation on `:name`. Each entry also carries `:path` (relative to the scanned root) and `:line` (1-based start line of the function), for every language; uml-viewer ignores them. `nil` coverage is what `--no-coverage` writes: complexity only, and CRAP is `nil` too. A function the coverage report does not mention scores 0%.
 
 | Language | `:namespace` | `:name` |
 | --- | --- | --- |

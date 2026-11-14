@@ -499,3 +499,14 @@ def test_help_documents_the_python_subprocess_coverage():
     help_text = parse_args(["--help"]).message
     assert "--python-subprocess-coverage" in help_text
     assert "7.10.6" in help_text
+
+
+def test_snapshot_rows_carry_relative_path_and_start_line(tmp_path):
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "mod.py").write_text("X = 1\n\n\ndef later(a):\n    return a\n", encoding="utf-8")
+    (tmp_path / "main.go").write_text("package demo\n\nfunc Go() int { return 1 }\n", encoding="utf-8")
+    assert run(["--root", str(tmp_path), "--no-coverage"]) == 0
+    text = (tmp_path / ".metrics" / "crap.edn").read_text(encoding="utf-8")
+    assert ':name "later"' in text and ':path "pkg/mod.py", :line 4' in text
+    assert ':name "Go"' in text and ':path "main.go", :line 3' in text
