@@ -33,6 +33,7 @@ def make_entry(function: Function, coverage: float | None) -> Entry:
         crap=round_metric(crap_score(function.complexity, coverage)),
         path=function.path,
         language=function.language,
+        start_line=function.start_line,
     )
 
 
