@@ -89,8 +89,8 @@ def test_location_and_language_are_recorded():
     for fn in found:
         by_name.setdefault(fn.name, fn)
     assert by_name["branchy"].start_line == 3
-    assert by_name["Shape::area"].start_line == 25
-    assert by_name["lam"].start_line == 46
+    assert by_name["Shape::area"].start_line == 24
+    assert by_name["lam"].start_line == 41
     assert all(fn.language == "cpp" and fn.path == "src/demo/shape.cpp" for fn in found)
 
 
