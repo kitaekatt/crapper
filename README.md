@@ -28,6 +28,7 @@ The first run creates `.venv` and installs the tool. From a project root it walk
 ./crapper --changed                      # git additions and edits
 ./crapper combat                         # path fragment, same idea as crap4clj
 ./crapper --threshold 30                 # exit 2 when the worst score is higher
+./crapper --python-test-dir tests        # Python tests live outside each source tree
 ```
 
 ## Snapshot
@@ -68,6 +69,8 @@ TypeScript, TSX, and JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`) use the same str
 Rust counts `if`, loops, each `match` arm, `?`, and `&&` / `||`. `mod tests` is skipped. Coverage is LCOV from `cargo llvm-cov` or `cargo tarpaulin`, run in the nearest directory that contains `Cargo.toml`. When neither tool is installed, the run installs `cargo-llvm-cov`.
 
 Python counts `if`, `elif`, `for`, `while`, `except`, each `match` case, a comprehension filter, a conditional expression, and each `and` / `or`. Nested functions stay inside the enclosing function. Coverage is LCOV from `coverage.py`, running pytest when the project uses it and `unittest` otherwise. `coverage` and `pytest` are installed into the project's interpreter when they are missing.
+
+Python tests run from the nearest directory that holds `pyproject.toml`, `setup.cfg`, `setup.py`, `pytest.ini`, or `tox.ini`, which is wrong when the tests sit in a separate tree, such as `plugins/<name>/` for sources and `tests/<name>/` for tests. `--python-test-dir <path>` names the test directory, relative to `--root`. Python coverage then runs once from the project root, with pytest or `unittest discover` pointed at that directory, and a `conftest.py` inside it selects pytest. It cannot be combined with `--coverage-command`.
 
 ## Coverage commands
 
